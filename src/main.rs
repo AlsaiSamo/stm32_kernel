@@ -1,0 +1,12 @@
+#![no_std]
+#![no_main]
+
+use core::panic::PanicInfo;
+
+#[panic_handler]
+fn panic(_panic: &PanicInfo<'_>) -> ! {
+    //TODO: make cpu sleep?
+    loop{}
+}
+
+//TODO: main

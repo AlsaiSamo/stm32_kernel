@@ -1,0 +1,6 @@
+[build]
+target = "thumbv7em-none-eabihf"
+
+[target.thumbv7em-none-eabihf]
+runner = "qemu-system-arm -M stm32vldiscovery -nographic"
+rustflags = ["-C", "link-arg=-Tmem.x"]
