@@ -31,12 +31,14 @@ impl USART {
 }
 
 pub mod threading {
+    //TODO: rewrite to use a linked list
     use core::ptr::swap;
     
-    const MAX_THREAD_COUNT: usize = 16;
+    //Arbitrary number of threads. TODO: set at 16
+    const MAX_THREAD_COUNT: usize = 4;
 
     #[repr(C)]
-    #[derive(PartialEq, Eq)]
+    #[derive(PartialEq, Eq, Copy, Clone)]
     pub enum Priority{
         Realtime,
         High,
@@ -46,27 +48,46 @@ pub mod threading {
 
     //TODO: understand what states make sense
     #[repr(C)]
-    #[derive(PartialEq, Eq)]
+    #[derive(PartialEq, Eq, Copy, Clone)]
     pub enum State {
         Active,
         Sleeping,
         Dead
     }
 
-    //TODO: make a default thread
+    //TODO: make fields private
     #[repr(C)]
+    #[derive(Copy, Clone)]
     pub struct Thread {
-        id: usize,
-        name: [char; 16],
-        priority: Priority,
-        state: State
+        pub id: usize,
+        pub name: [char; 16],
+        pub priority: Priority,
+        pub state: State
     }
     
-    //Arbitrary number of threads - 16
-    //struct ThreadQueue([Thread; 16]);
-    struct ThreadQueue{
+    impl Thread {
+        const fn const_default() -> Self {
+            Thread {
+                id: 0,
+                name: ['-'; 16],
+                priority: Priority::Medium,
+                state: State::Dead
+            }
+        }
+    }
+    
+    pub struct ThreadQueue{
         queue: [Thread; MAX_THREAD_COUNT],
         len: usize
+    }
+    
+    impl ThreadQueue {
+        pub const fn default() -> Self {
+            ThreadQueue {
+                len: 0,
+                queue: [Thread::const_default(); MAX_THREAD_COUNT]
+            }
+        }
     }
 
     impl ThreadQueue {
@@ -78,9 +99,11 @@ pub mod threading {
         ///   be selected, if such exists.
         ///3. The first Active thread will be selected, if such exists.
         ///4. No thread is selected
-        fn select(&mut self, prio: Priority) -> Option<&Thread> {
+        pub fn select(&mut self, prio: Priority) -> Option<&Thread> {
             let mut selection: Option<usize> = None;
             let mut i = 0;
+            //Prevents from stopping seeking priority tasks
+            let mut seeking_realtime = false;
             while i < self.len {
                 if self.queue[i].state != State::Active{ i+= 1; continue; }
                 let current = &self.queue[i];
@@ -90,16 +113,20 @@ pub mod threading {
                         break;
                     },
                     (cur, _) if cur.priority == prio => {
-                        selection = Some(i);
-                        break;
+                        if !seeking_realtime {
+                            selection = Some(i);
+                            seeking_realtime = true;
+                        }
+                        //break;
                     },
                     (_, None) => {selection = Some(i);},
                     (_, _) => {}
                 }
+                i += 1;
             }
             if let Some(i) = selection {
                 unsafe{
-                    swap(&mut self.queue[i] as *mut Thread, &mut self.queue[self.len-1] as *mut Thread);
+                    self.queue[i..self.len].rotate_left(1);
                 }
                 return Some(&self.queue[self.len-1]);
             }
@@ -114,24 +141,62 @@ pub mod threading {
     }
 }
 
+use crate::threading::{Thread, Priority, State, ThreadQueue};
+
+static mut threadQueue: ThreadQueue = ThreadQueue::default();
+static mut USART1: USART = USART(0x40013800 as *mut usize);
+
 #[panic_handler]
+#[no_mangle]
 fn panic(_panic: &PanicInfo<'_>) -> ! {
     //TODO: have proper panicking behaviour
     loop{}
 }
 
 #[no_mangle]
-pub fn SysTick() -> () {
-    loop{}
+pub unsafe extern "C" fn SysTick() -> () {
+    unsafe {
+        let sel = threadQueue.select(Priority::Medium).unwrap();
+        USART1.test_send(&(sel.name[0] as u8));
+    }
 }
+
 
 entrypoint!(main);
 #[no_mangle]
 pub fn main() -> ! {
-    let mut USART1 = USART(0x40013800 as *mut usize);
-    let _c = [60,61,62,63,64,65];
-    unsafe {
-        USART1.test_send(&_c[5]);
+    unsafe{
+        threadQueue.add(Thread{
+            id: 1,
+            name: ['A'; 16],
+            priority: Priority::Medium,
+            state: State::Active
+        }).unwrap();
+        threadQueue.add(Thread{
+            id: 3,
+            name: ['B'; 16],
+            priority: Priority::Medium,
+            state: State::Active
+        }).unwrap();
+        threadQueue.add(Thread{
+            id: 3,
+            name: ['C'; 16],
+            priority: Priority::Medium,
+            state: State::Active
+        }).unwrap();
     }
+    //SysTick
+    unsafe {
+        //Configure systick
+        ptr::write_volatile(0xE000E014 as *mut usize, 0x00010000);
+        //Enable systick
+        ptr::write_volatile(0xE000E010 as *mut usize, 0x00000003);
+    }
+
+    // let mut USART1 = USART(0x40013800 as *mut usize);
+    // let _c = [60,61,62,63,64,65];
+    // unsafe {
+    //     USART1.test_send(&_c[5]);
+    // }
     loop{}
 }
