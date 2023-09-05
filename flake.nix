@@ -39,7 +39,7 @@
       in {
         defaultPackage = crate;
         devShell = pkgs.mkShell {
-          buildInputs = with pkgs; [ qemu openocd rust cargo-binutils gdb ];
+          buildInputs = with pkgs; [ qemu openocd rust cargo-binutils gdb rust-analyzer ];
           RUST_SRC_PATH = pkgs.rustPlatform.rustLibSrc;
           NO_RUSTUP = 1;
           #what is this for?
